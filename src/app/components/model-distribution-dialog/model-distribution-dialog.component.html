@@ -1,0 +1,33 @@
+<div class="distribute-dialog">
+  <div class="dialog-head">
+    <h3>Distributing {{ data?.modelName }}</h3>
+    <p class="muted">Distribution in progress — this may take a few seconds per client</p>
+  </div>
+
+
+
+  <!-- Distributing overlay: show while distribution is in progress -->
+  <div class="distributing-overlay" *ngIf="isDistributing()">
+    <div class="monitor">
+      <div class="network">
+        <div class="center">
+          <div class="lock"><mat-icon>dns</mat-icon></div>
+          <div class="percent">{{ progress }}%</div>
+        </div>
+        <!-- nodes around the center -->
+        <div class="node" *ngFor="let node of getNodes(); let i = index" [style.left]="node.left" [style.top]="node.top">
+          <mat-icon>lock</mat-icon>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="success-overlay" *ngIf="allActive()">
+    <div class="success-card">
+      <div class="check"> <mat-icon>check_circle</mat-icon> </div>
+      <h3>Model successfully distributed to all clients</h3>
+      <p>Clients will use the model for a month before sending updates.</p>
+      <p class="muted small">Next distribution in 1 month</p>
+    </div>
+  </div>
+</div>

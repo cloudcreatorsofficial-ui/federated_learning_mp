@@ -1,0 +1,42 @@
+<div class="login-container">
+  <!-- Network Background Pattern -->
+  <div class="network-bg" aria-hidden="true"></div>
+
+  <!-- Centered Content -->
+  <div class="center-wrap">
+    <header class="app-header">
+      <h1 class="app-title">Federated Learning Central Server</h1>
+      <!-- use ligature icon only (no svgIcon attribute) to avoid stray text fallback -->
+      <mat-icon class="user-icon">account_circle</mat-icon>
+    </header>
+
+    <!-- Lock positioned above card (moved out so it's never clipped) -->
+    <div class="lock-icon-wrap" [class.unlocked]="!isLocked" [class.invalid]="invalid">
+      <mat-icon class="lock-icon">{{ isLocked ? 'lock' : 'lock_open' }}</mat-icon>
+    </div>
+
+    <!-- Glass Card -->
+    <div class="glass-card">
+
+      <h2 class="card-title">Access Secure Dashboard</h2>
+
+      <form (ngSubmit)="onUnlock()" class="card-form" autocomplete="off">
+        <mat-form-field appearance="outline" class="username-field">
+          <mat-label>Username</mat-label>
+          <mat-icon matPrefix class="input-icon">person</mat-icon>
+          <input matInput [(ngModel)]="username" name="username" required />
+        </mat-form-field>
+
+        <mat-form-field appearance="outline" class="password-field">
+          <mat-label>Password</mat-label>
+          <mat-icon matPrefix class="input-icon">lock</mat-icon>
+          <input matInput type="password" [(ngModel)]="password" name="password" required />
+        </mat-form-field>
+
+        <button mat-raised-button color="primary" type="submit" class="unlock-btn">Unlock</button>
+      </form>
+
+      <p class="card-sub">Your data remains encrypted</p>
+    </div>
+  </div>
+</div>

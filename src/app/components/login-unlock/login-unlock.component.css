@@ -1,0 +1,184 @@
+.login-container {
+  position: relative;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  font-family: 'Poppins', 'Arial', sans-serif;
+  /* use shared network background asset (place your image at src/assets/bg-network.jpg) */
+  background: url('/assets/bg-network.jpg') no-repeat center center fixed;
+  
+  background-size: cover;
+}
+
+.network-bg {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+}
+
+.center-wrap {
+  position: relative;
+  z-index: 2;
+  text-align: center;
+  width: 100%;
+  max-width: 1100px;
+  padding: 40px 20px 20px;
+  box-sizing: border-box;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-bottom: 24px;
+  position: relative;
+  z-index: 3;
+}
+
+.app-title {
+  color: #ffffff;
+  font-size: 2rem;
+  font-weight: 600;
+  margin: 0;
+  text-shadow: 0 6px 20px rgba(0,123,255,0.12);
+}
+
+.user-icon {
+  color: white;               /* icon color */
+  /* background-color: #59a6ff;  circular background color */
+  font-size: 2rem;          /* icon size */
+  border-radius: 50%;         /* makes it a perfect circle */
+  display: inline-flex;       /* centers the icon */
+  align-items: center;
+  justify-content: center;
+  width: 40px;                /* fixed width for circle */
+  height: 40px;               /* fixed height for circle */
+  overflow: hidden;           /* prevents cut edges */
+}
+
+
+.glass-card {
+  margin: 0 auto;
+  width: 480px;
+  max-width: calc(100% - 40px);
+  background: linear-gradient(180deg, rgba(10,18,28,0.6), rgba(6,12,20,0.5));
+  border: 1px solid rgba(95, 160, 255, 0.12);
+  border-radius: 14px;
+  padding: 56px 32px 36px; /* add top padding so the lock doesn't overlap content */
+  backdrop-filter: blur(8px) saturate(120%);
+  box-shadow: 0 10px 40px rgba(3, 9, 20, 0.6), inset 0 1px 0 rgba(255,255,255,0.02);
+  color: #e9f2ff;
+  position: relative; /* create positioned container for absolute lock */
+  overflow: visible; /* allow lock to extend above card without being clipped */
+}
+
+.lock-icon {
+  color: white;               /* icon color */
+
+  font-size: 1.6rem;          /* icon size */
+  border-radius: 50%;         /* makes it a perfect circle */
+  display: inline-flex;       /* centers the icon */
+  align-items: center;
+  justify-content: center;
+  width: 38px;                /* circular container width */
+  height: 38px;               /* circular container height */
+  overflow: hidden;           /* ensures no clipping */
+}
+
+
+/* when unlocked, make the icon change color/rotate slightly */
+.lock-icon-wrap.unlocked .lock-icon {
+  color: #9ff0a8;
+  transform: rotate(-12deg) scale(1.05);
+  transition: transform 320ms ease, color 260ms ease;
+}
+
+/* invalid state: small shake */
+.lock-icon-wrap.invalid {
+  animation: shake 600ms ease;
+}
+
+@keyframes shake {
+  0% { transform: translateX(-50%) translateY(0); }
+  20% { transform: translateX(-50%) translateY(-3px); }
+  40% { transform: translateX(-50%) translateY(3px); }
+  60% { transform: translateX(-50%) translateY(-2px); }
+  80% { transform: translateX(-50%) translateY(2px); }
+  100% { transform: translateX(-50%) translateY(0); }
+}
+
+.lock-icon {
+  font-size: 40px;
+  color: #e6f7ff;
+  filter: drop-shadow(0 6px 18px rgba(0,123,255,0.25));
+}
+
+/* ensure the icon glyph isn't clipped due to line-height/rendering */
+.lock-icon {
+  display: inline-block;
+  line-height: 1;
+}
+
+.card-title {
+  margin: 28px 0 18px; /* add top spacing so title doesn't overlap the lock */
+  font-size: 1.25rem;
+  color: #dff1ff;
+}
+
+.card-form {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+}
+
+.username-field {
+  width: 100%;
+}
+
+.password-field {
+  width: 100%;
+}
+
+.input-icon {
+  color: #7fb5ff;
+}
+
+mat-form-field {
+  --mdc-filled-text-field-label-text-color: #dbeeff;
+  --mdc-filled-text-field-input-text-color: #eaf6ff;
+  --mdc-filled-text-field-idle-line-color: rgba(127,181,255,0.18);
+  --mdc-filled-text-field-focus-line-color: #7fb5ff;
+}
+
+.unlock-btn {
+  width: 160px;
+  background: linear-gradient(180deg, #2aa0ff 0%, #0072d6 100%);
+  color: #fff;
+  border-radius: 24px;
+  padding: 10px 14px;
+  font-weight: 600;
+  box-shadow: 0 8px 30px rgba(13,85,160,0.18);
+}
+
+.card-sub {
+  margin-top: 18px;
+  font-size: 0.85rem;
+  color: rgba(225,245,255,0.6);
+}
+
+@media (max-width: 520px) {
+  .glass-card {
+    padding: 26px 18px;
+  }
+
+  .lock-icon-wrap {
+    width: 64px;
+    height: 64px;
+    margin-top: -48px;
+  }
+}

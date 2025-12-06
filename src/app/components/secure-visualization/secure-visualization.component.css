@@ -1,0 +1,2 @@
+.secure-viz { border: 1px dashed #999; padding: 8px; margin-top: 12px; }
+.viz-canvas { height: 160px; background: #fafafa; display:flex; align-items:center; justify-content:center; color:#666; }
