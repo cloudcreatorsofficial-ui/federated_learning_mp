@@ -13,7 +13,7 @@ import { MatButtonModule } from '@angular/material/button';
       <div class="success-card">
         <div class="check"> <mat-icon>check_circle</mat-icon> </div>
         <h3>Model successfully distributed</h3>
-        <p>{{ data?.modelName }} has been deployed to all clients.</p>
+        <p>{{ data.modelName }} has been deployed to all clients.</p>
         <p class="muted small">Clients will use the model for a month before sending updates.</p>
         <div class="actions">
           <button mat-button (click)="close()">Close</button>
