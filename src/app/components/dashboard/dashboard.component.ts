@@ -83,14 +83,14 @@ export class DashboardComponent implements OnInit {
           panelClass: 'success-dialog-panel'
         });
 
-        // After success dialog closes, update client statuses
+        // After success dialog closes, update client statuses quickly
         successDialogRef.afterClosed().subscribe(() => {
-          // Simulate staggered distribution to each client, then mark Active or Connected based on previous status
+          // Simulate quick distribution to each client with minimal stagger
           this.clients.forEach((c, idx) => {
-            const startDelay = 800 + idx * 600; // stagger start per client
+            const startDelay = 100 + idx * 150; // reduced stagger: 100-1600ms instead of 800-6800ms
             setTimeout(() => {
               c.status = 'Deploying';
-              // small deploy window
+              // Much shorter deploy window
               setTimeout(() => {
                 // If previous status was 'Awaiting Model', set to 'Active'; otherwise, set to 'Connected'
                 if (c._prevStatus === 'Awaiting Model') {
@@ -103,7 +103,8 @@ export class DashboardComponent implements OnInit {
                   const acc = (85 + Math.random() * 10).toFixed(1);
                   c.accuracy = acc + '%';
                 }
-              }, 1000 + Math.random() * 1000);
+                this.cdr.markForCheck(); // trigger change detection for faster UI update
+              }, 200 + Math.random() * 300); // much faster: 200-500ms instead of 1000-2000ms
             }, startDelay);
           });
         });
