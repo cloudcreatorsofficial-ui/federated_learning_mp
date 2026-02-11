@@ -86,16 +86,16 @@
                 </tr>
               </thead>
               <tbody>
-                <tr *ngFor="let c of clients; let i = index">
-                  <td>{{ c.clientId || (('00' + (i+1)).slice(-3) + (['A','B','C','D','E'][i] || 'X')) }}</td>
+                <tr *ngFor="let c of clients.slice(0, 3); let i = index">
+                  <td>{{ c.clientId }}</td>
                   <td>
-                    <span class="badge" [ngClass]="{ 'badge-completed': i===1, 'badge-failed': i===2, 'badge-training': i===4 }">
-                      {{ i===1 ? 'Completed' : (i===2 ? 'Failed/Timeout' : (i===4 ? 'Training' : (c.status || '4'))) }}
+                    <span class="badge" [ngClass]="{ 'badge-completed': c.status === 'Active', 'badge-training': c.status === 'Deployed (Awaiting Ack)', 'badge-awaiting': c.status === 'Awaiting Model' }">
+                      {{ c.status }}
                     </span>
                   </td>
-                  <td>{{ getRandomActive(i) }}</td>
+                  <td>Round {{ (i + 1) * 2 }}</td>
                   <td>{{ c.accuracy || 'N/A' }}</td>
-                  <td>{{ getRandomSampleSize(i) | number }}</td>
+                  <td>{{ (2500 + i * 1200) | number }}</td>
                 </tr>
               </tbody>
             </table>
@@ -111,47 +111,110 @@
 
         <!-- Interactive View -->
         <div *ngIf="activeTab==='interactive'" class="progress-left interactive-rows">
-          <div *ngFor="let round of rounds" class="round-row">
-            <div class="summary-card">
-              <div class="summary-header">Federated Round {{ round.roundNumber }} Summary</div>
-              <table class="summary-table">
-                <thead>
-                  <tr>
-                    <th>Client ID</th>
-                    <th>Training Time</th>
-                    <th>Model Size (MB)</th>
-                    <th>Local Model Diff Norm</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr *ngFor="let e of round.entries | slice:0:5">
-                    <td>{{ e.clientId }}</td>
-                    <td>{{ e.trainingTime }}</td>
-                    <td>{{ e.modelSizeMB }}</td>
-                    <td [ngClass]="{ 'best': getBestLocalDiff(round) !== null && e.localDiffNorm === getBestLocalDiff(round) }">{{ e.localDiffNorm | number:'1.3-3' }}</td>
-                  </tr>
-                </tbody>
-              </table>
+          <div *ngFor="let round of rounds; let last = last" class="round-section">
+            <!-- Top Row: Summary and Metrics -->
+            <div class="round-top-row">
+              <div class="summary-card">
+                <div class="summary-header">Federated Round {{ round.roundNumber }} - {{ last ? 'In Progress' : 'Completed' }}</div>
+                <table class="summary-table">
+                  <thead>
+                    <tr>
+                      <th>Client ID</th>
+                      <th>Training Time</th>
+                      <th>Model Size (MB)</th>
+                      <th>Loss</th>
+                      <th>Accuracy</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr *ngFor="let client of round.clients">
+                      <td>{{ client.id }}</td>
+                      <td>{{ client.trainingTime }}</td>
+                      <td>{{ client.modelSize }}</td>
+                      <td>{{ client.loss | number:'1.2-3' }}</td>
+                      <td>{{ client.accuracy | number:'1.1-1' }}%</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <div class="summary-metrics">
+                <div class="metrics-card small-metrics">
+                  <div class="metric-title">Global Model Metrics - Round {{ round.roundNumber }}</div>
+                  <div class="metric-row">
+                    <div class="metric-label">Global Loss</div>
+                    <div class="metric-value">{{ round.global.loss | number:'1.3-3' }}</div>
+                  </div>
+                  <div class="metric-row">
+                    <div class="metric-label">Global Accuracy</div>
+                    <div class="metric-value">{{ round.global.accuracy | number:'1.1-1' }}%</div>
+                  </div>
+                  <div class="completion small">
+                    <div class="completion-label">Client Completion</div>
+                    <div class="completion-ring small-ring">
+                      <div class="ring-inner" [ngStyle]="getRingStyle(round.global.completionRate)">{{ round.global.completionRate }}%</div>
+                    </div>
+                  </div>
+                  <div class="round-time">Round Time Elapsed: {{ round.global.timeElapsed }}</div>
+                </div>
+              </div>
             </div>
 
-            <div class="summary-metrics">
-              <div class="metrics-card small-metrics">
-                <div class="metric-title">Global Model Metrics</div>
-                <div class="metric-row">
-                  <div class="metric-label">Round {{ round.roundNumber }} Global Loss</div>
-                  <div class="metric-value">{{ round.global.loss }}</div>
-                </div>
-                <div class="metric-row">
-                  <div class="metric-label">Round {{ round.roundNumber }} Global Accuracy</div>
-                  <div class="metric-value">{{ round.global.accuracy }}</div>
-                </div>
-                <div class="completion small">
-                  <div class="completion-label">Client Completion</div>
-                  <div class="completion-ring small-ring">
-                    <div class="ring-inner" [ngStyle]="getRingStyle(round.global.completionRate)">{{ round.global.completionRate }}%</div>
+            <!-- Bottom Row: Analysis Charts (Full Width) -->
+            <div class="analysis-charts">
+              <div class="chart-row">
+                <div class="chart-card training-time-chart">
+                  <h4>Client Training Time Distribution (Round {{ round.roundNumber }})</h4>
+                  <div class="horizontal-bars">
+                    <div *ngFor="let client of round.clients" class="bar-row">
+                      <span class="client-label">{{ client.id }}</span>
+                      <div class="bar-container">
+                        <div class="bar" [style.width.%]="(parseTrainingSeconds(client.trainingTime) / 60) * 100"></div>
+                      </div>
+                      <span class="bar-value">{{ client.trainingTime }}</span>
+                    </div>
                   </div>
                 </div>
-                <div class="round-time">Round Time Elapsed: {{ round.global.timeElapsed }}</div>
+
+                <div class="chart-card loss-distribution-chart">
+                  <h4>Client Loss Distribution Over Time</h4>
+                  <div class="line-chart-placeholder">
+                    <svg viewBox="0 0 400 200" class="line-chart">
+                      <!-- Y-axis labels -->
+                      <text x="30" y="20" class="chart-label">10%</text>
+                      <text x="30" y="90" class="chart-label">5%</text>
+                      <text x="30" y="160" class="chart-label">0%</text>
+                      
+                      <!-- Y-axis line -->
+                      <line x1="35" y1="10" x2="35" y2="170" stroke="#fff" stroke-width="0.5" opacity="0.3"/>
+                      
+                      <!-- X-axis line -->
+                      <line x1="35" y1="170" x2="390" y2="170" stroke="#fff" stroke-width="0.5" opacity="0.3"/>
+                      
+                      <!-- Grid lines -->
+                      <line x1="35" y1="90" x2="390" y2="90" stroke="#fff" stroke-width="0.5" opacity="0.1"/>
+                      
+                      <!-- Data lines for each client -->
+                      <polyline *ngFor="let client of round.clients; let i = index" 
+                                [attr.points]="getChartPoints(round.clients, i)" 
+                                class="data-line" 
+                                [ngStyle]="{'stroke': getClientColor(i)}"/>
+                      
+                      <!-- Data points -->
+                      <circle *ngFor="let client of round.clients; let i = index" 
+                              [attr.cx]="80 + (i * 100)"
+                              [attr.cy]="170 - (client.loss * 50)"
+                              r="3"
+                              [ngStyle]="{'fill': getClientColor(i), 'opacity': 0.8}"/>
+                      
+                      <!-- X-axis labels -->
+                      <text *ngFor="let client of round.clients; let i = index" 
+                            [attr.x]="80 + (i * 100)" 
+                            y="190" 
+                            class="chart-label">{{ client.id }}</text>
+                    </svg>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -165,7 +228,7 @@
               <label>Select Client:</label>
               <select (change)="selectDiagnosticClient($any($event.target).value)" [value]="selectedDiagnosticClient || ''">
                 <option value="" disabled>Choose a client</option>
-                <option *ngFor="let c of clients" [value]="c.clientId || c.name">{{ c.clientId || c.name }}</option>
+                <option *ngFor="let c of clients.slice(0, 3); let i = index" [value]="c.id">{{ c.clientId }} - {{ c.name }}</option>
               </select>
             </div>
             <div *ngIf="selectedDiagnosticClient">
@@ -179,34 +242,48 @@
           <div *ngIf="selectedDiagnosticClient" class="diagnostic-content">
             <div class="diagnostic-top-row">
               <div class="diagnostic-metrics">
-                <h4>Performance Metrics</h4>
+                <h4>Client Performance - Round {{ selectedDiagnosticRound || 'Latest' }}</h4>
                 <div class="metric-stat">
-                  <span>Current Loss:</span>
-                  <strong>{{ diagnosticData.performanceHistory && diagnosticData.performanceHistory[0] ? diagnosticData.performanceHistory[0].loss : 'N/A' }}</strong>
+                  <span>Client ID:</span>
+                  <strong>{{ diagnosticData.clientId }}</strong>
                 </div>
                 <div class="metric-stat">
-                  <span>Training Status:</span>
-                  <strong>Active</strong>
+                  <span>Status:</span>
+                  <strong>{{ diagnosticData.status }}</strong>
+                </div>
+                <div class="metric-stat">
+                  <span>Current Loss:</span>
+                  <strong>{{ diagnosticData.loss | number:'1.3-3' }}</strong>
+                </div>
+                <div class="metric-stat">
+                  <span>Accuracy:</span>
+                  <strong>{{ diagnosticData.accuracy | number:'1.1-1' }}%</strong>
+                </div>
+                <div class="metric-stat">
+                  <span>Training Time:</span>
+                  <strong>{{ diagnosticData.trainingTime }}</strong>
                 </div>
               </div>
 
               <div class="failure-log">
-                <h4>Failure & Debugging Log</h4>
+                <h4>Client Data Summary</h4>
                 <table class="log-table">
                   <thead>
                     <tr>
                       <th>Round</th>
-                      <th>Type</th>
-                      <th>Timespan</th>
-                      <th>Details</th>
+                      <th>Loss</th>
+                      <th>Accuracy</th>
+                      <th>Status</th>
                     </tr>
                   </thead>
                   <tbody>
-                    <tr *ngFor="let log of diagnosticData.failureLog">
-                      <td>{{ log.round }}</td>
-                      <td>{{ log.type }}</td>
-                      <td>{{ log.timespain }}</td>
-                      <td>{{ log.details }}</td>
+                    <tr *ngFor="let r of rounds">
+                      <td>{{ r.roundNumber }}</td>
+                      <td>{{ r.global?.loss | number:'1.3-3' }}</td>
+                      <td>{{ r.global?.accuracy | number:'1.1-1' }}%</td>
+                      <td>
+                        <span class="badge badge-completed">Completed</span>
+                      </td>
                     </tr>
                   </tbody>
                 </table>
@@ -215,17 +292,17 @@
 
             <div class="diagnostic-bottom-row">
               <div class="failure-chart">
-                <h4>Disconnection/Failure Rate</h4>
+                <h4>Loss Trend Across Rounds</h4>
                 <div class="bar-chart-placeholder">
-                  <div *ngFor="let d of diagnosticData.disconnectionRates" class="bar-item">
-                    <div class="bar" [style.height.%]="d.rate * 10"></div>
-                    <span>{{ d.round }}</span>
+                  <div *ngFor="let r of rounds" class="bar-item">
+                    <div class="bar" [style.height.%]="(r.global?.loss || 0) * 100"></div>
+                    <span>R{{ r.roundNumber }}</span>
                   </div>
                 </div>
               </div>
 
               <div class="metrics-card global-metrics">
-                <h4>Global Model Metrics after final round</h4>
+                <h4>Latest Global Model Metrics</h4>
                 <div class="metric-row">
                   <div class="metric-label">Global Loss</div>
                   <div class="metric-value">0.421</div>

@@ -1,4 +1,4 @@
-import { Component, Inject, OnInit, OnDestroy } from '@angular/core';
+import { Component, Inject, OnInit, OnDestroy, ChangeDetectorRef } from '@angular/core';
 import { MatDialogRef, MAT_DIALOG_DATA } from '@angular/material/dialog';
 import { CommonModule } from '@angular/common';
 import { MatIconModule } from '@angular/material/icon';
@@ -11,41 +11,49 @@ import { MatButtonModule } from '@angular/material/button';
   templateUrl: './model-distribution-dialog.component.html',
   styleUrls: ['./model-distribution-dialog.component.css'],
 })
-export class ModelDistributionDialogComponent {
+export class ModelDistributionDialogComponent implements OnInit, OnDestroy {
   // data may contain modelName and clients array
   constructor(
     public dialogRef: MatDialogRef<ModelDistributionDialogComponent>,
-    @Inject(MAT_DIALOG_DATA) public data: { modelName: string; clients?: any[] }
+    @Inject(MAT_DIALOG_DATA) public data: { modelName: string; clients?: any[] },
+    public cdr: ChangeDetectorRef
   ) {}
 
   close() {
     this.dialogRef.close(true);
   }
 
-  // number of active clients
-  activeCount(): number {
+  // number of clients that are deployed (or in deploying state)
+  deployedCount(): number {
     const arr = this.data && this.data.clients ? this.data.clients : [];
-    return arr.filter((c: any) => (c && c.status) === 'Active').length;
+    const targetArr = arr.filter((c: any) => c && c._target === true);
+    const used = targetArr.length > 0 ? targetArr : arr;
+    return used.filter((c: any) => {
+      const s = (c && c.status || '').toLowerCase();
+      return s.indexOf('deploy') !== -1 || s.indexOf('deployed') !== -1 || s.indexOf('active') !== -1;
+    }).length;
   }
 
   totalCount(): number {
     const arr = this.data && this.data.clients ? this.data.clients : [];
-    return arr.length;
+    const targetArr = arr.filter((c: any) => c && c._target === true);
+    const used = targetArr.length > 0 ? targetArr : arr;
+    return used.length;
   }
 
-  // percentage completed (round to nearest integer)
+  // percentage completed (round to nearest integer) based on deployed clients
   distributionPercent(): number {
     const total = this.totalCount();
     if (!total) return 0;
-    return Math.round((this.activeCount() / total) * 100);
+    return Math.round((this.deployedCount() / total) * 100);
   }
 
   // whether a distribution is currently ongoing
   isDistributing(): boolean {
     const total = this.totalCount();
     if (!total) return false;
-    // distribute while at least one client is not Active
-    return !this.allActive();
+    // distributing while at least one client is not yet deployed
+    return this.deployedCount() < total;
   }
 
   // helper used from template to map status to icon
@@ -71,7 +79,7 @@ export class ModelDistributionDialogComponent {
   }
 
   getNodes(): any[] {
-    const clientCount = this.totalCount();
+    const clientCount = this.clientCount > 0 ? this.clientCount : this.totalCount();
     const nodes = [];
     for (let i = 0; i < clientCount; i++) {
       const angle = (i / clientCount) * 2 * Math.PI - Math.PI / 2; // start from top
@@ -86,45 +94,47 @@ export class ModelDistributionDialogComponent {
   private _watcher: any;
   // visual progress percentage for distributing UI (1..100)
   progress = 0;
-  private _progressTimer: any;
+  sseComplete = false;
+  clientCount = 0;
 
   ngOnInit(): void {
-    // watch for progress to reach 100% and close dialog
+    // Set the number of targeted clients
+    this.clientCount = this.totalCount();
+    
+    // update visual progress based on SSE stream only
     this._watcher = setInterval(() => {
       try {
-        if (this.progress >= 100) {
-          // Close the distribution dialog when progress reaches 100%
-          this.dialogRef.close(true);
-        } else {
-          // start progress animation if not already running
-          if (!this._progressTimer) {
-            // initialize at 1 when distribution begins
-            this.progress = 1;
-            this._progressTimer = setInterval(() => {
-              // increment by 5% gradually until 100%
-              if (this.progress < 100) {
-                this.progress += 5;
-                if (this.progress > 100) this.progress = 100;
-              }
-            }, 80);
+        // Only rely on SSE progress (current), not on computed status percentage
+        const current = this.progress;
+
+        // Only close when SSE stream signals completion (current === 100)
+        if (current >= 100 && this.sseComplete) {
+          this.progress = 100;
+          // give a short success animation then close
+          try {
+            this.dialogRef.removePanelClass('dist-distributing-panel');
+            this.dialogRef.addPanelClass('dist-success-panel');
+          } catch (e) {}
+          setTimeout(() => {
+            try {
+              this.dialogRef.close(true);
+            } catch (e) {}
+          }, 500);
+          if (this._watcher) {
+            clearInterval(this._watcher);
+            this._watcher = null;
           }
-          // Make dialog transparent during distribution
-          this.dialogRef.addPanelClass('dist-distributing-panel');
         }
       } catch (e) {
-        // ignore if dialogRef not available
+        // ignore errors
       }
-    }, 180);
+    }, 400);
   }
 
   ngOnDestroy(): void {
     if (this._watcher) {
       clearInterval(this._watcher);
       this._watcher = null;
-    }
-    if (this._progressTimer) {
-      clearInterval(this._progressTimer);
-      this._progressTimer = null;
     }
     try {
       this.dialogRef.removePanelClass('dist-success-panel');

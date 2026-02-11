@@ -7,7 +7,7 @@
 
 
   <!-- Distributing overlay: show while distribution is in progress -->
-  <div class="distributing-overlay" *ngIf="isDistributing()">
+  <div class="distributing-overlay" *ngIf="progress > 0 && progress < 100">
     <div class="monitor">
       <div class="network">
         <div class="center">
@@ -22,7 +22,7 @@
     </div>
   </div>
 
-  <div class="success-overlay" *ngIf="allActive()">
+  <div class="success-overlay" *ngIf="progress >= 100 && sseComplete">
     <div class="success-card">
       <div class="check"> <mat-icon>check_circle</mat-icon> </div>
       <h3>Model successfully distributed to all clients</h3>

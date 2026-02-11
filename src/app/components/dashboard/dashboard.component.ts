@@ -34,7 +34,7 @@ export class DashboardComponent implements OnInit {
   showClientProgress = false;
   activeTab: 'basic' | 'interactive' | 'diagnostic' = 'basic';
   interfaceRoundEntry: any; // placeholder to keep file valid if tooling inspects
-  rounds: { roundNumber: number; entries: { clientId: string; trainingTime: string; modelSizeMB: number; localDiffNorm: number; status: string; }[]; global: { loss: string; accuracy: string; completionRate: number; timeElapsed: string; } }[] = [];
+  rounds: any[] = [];
 
   constructor(private clientService: HospitalClientService, private authService: AuthService, private router: Router, private dialog: MatDialog, private cdr: ChangeDetectorRef) {}
 
@@ -60,7 +60,7 @@ export class DashboardComponent implements OnInit {
   }
 
   distributeModel() {
-    // Prepare clients for distribution: mark as awaiting and open a dialog bound to the same clients array
+    // Mark clients as awaiting and open distribution dialog
     this.clients.forEach((c) => {
       c._prevStatus = c.status;
       c.status = 'Awaiting Model';
@@ -73,40 +73,137 @@ export class DashboardComponent implements OnInit {
       panelClass: 'dist-dialog-panel'
     });
 
-    // Dialog will monitor progress and close when 100%, then show success dialog
+    // Determine targeted clients (for demo we use first 3 clients)
+    const targetedIds = this.clients.slice(0, 3).map(c => c.id);
+    // Mark targeted clients with a _target flag so the dialog can focus on them
+    this.clients.forEach((c) => { c._target = targetedIds.includes(c.id); });
+
+    // open SSE stream for real-time progress — first ensure server has a global model
+    const clientParam = targetedIds.join(',');
+    const dialogComp = (dialogRef.componentInstance as any);
+    
+    this.clientService.status().subscribe({
+      next: (s) => {
+        if (!s || !s.global_model_updated) {
+          console.error('No global model available to distribute');
+          // close dialog and notify user
+          try { dialogRef.close(false); } catch (e) {}
+          return;
+        }
+
+        const url = `${this.clientService.distributeStreamUrl()}?clients=${clientParam}&model_name=global_model_updated.h5`;
+        const es = new EventSource(url);
+
+        es.onmessage = (ev) => {
+          try {
+            console.debug('SSE message', ev.data);
+            const d = JSON.parse(ev.data || '{}');
+            const key = d.client; // e.g., 'client1'
+            if (key) {
+              const id = Number((key || '').replace('client',''));
+              const local = this.clients.find(x => x.id === id);
+              if (local) {
+                if (d.error) {
+                  local.status = 'Error: ' + d.error;
+                } else if (typeof d.progress === 'number') {
+                  local.progress = d.progress;
+                  if (d.progress >= 100) {
+                    local.status = 'Deployed';
+                    local.progress = 100;
+                  } else {
+                    local.status = `Deploying (${d.progress}%)`;
+                  }
+                }
+              }
+            }
+
+            // update center progress if available
+            if (d.overall !== undefined && dialogComp) {
+              try { dialogComp.progress = d.overall; } catch(e){}
+            }
+
+            this.cdr.markForCheck();
+          } catch (e) {
+            console.error('sse parse error', e);
+          }
+        };
+
+        es.addEventListener('done', () => {
+          try { es.close(); } catch (e) {}
+          
+          // Signal to dialog that SSE stream is complete
+          if (dialogComp) {
+            try { dialogComp.sseComplete = true; } catch(e){}
+          }
+
+          // after stream finishes, start polling for ack status like before
+          let pollCount = 0;
+          const maxPolls = 30; // ~60 seconds if interval 2s
+          const pollInterval = 2000; // 2s
+          const pollId = setInterval(() => {
+            pollCount += 1;
+            this.clientService.getClientsStatus().subscribe({
+              next: (statusObj) => {
+                targetedIds.forEach((id) => {
+                  const key = `client${id}`;
+                  const entry = statusObj[key];
+                  if (!entry) return;
+                  const localClient = this.clients.find((x) => x.id === id);
+                  if (!localClient) return;
+
+                  if (entry.deployed && !entry.ack) {
+                    localClient.status = 'Deployed (Awaiting Ack)';
+                  }
+                  if (entry.ack) {
+                    localClient.status = 'Active';
+                    localClient.accuracy = localClient.accuracy || (85 + Math.random() * 10).toFixed(1) + '%';
+                  }
+                });
+
+                this.cdr.markForCheck();
+
+                const allAck = targetedIds.length > 0 && targetedIds.every(id => statusObj[`client${id}`] && statusObj[`client${id}`].ack);
+                if (allAck) {
+                  clearInterval(pollId);
+                  dialogRef.close(true);
+                } else if (pollCount >= maxPolls) {
+                  clearInterval(pollId);
+                  dialogRef.close(false);
+                }
+              },
+              error: (e) => {
+                console.error('failed to poll clients status', e);
+                if (pollCount >= maxPolls) {
+                  clearInterval(pollId);
+                  dialogRef.close(false);
+                }
+              }
+            });
+          }, pollInterval);
+        });
+
+        es.onerror = (err) => {
+          console.error('SSE error', err);
+          try { es.close(); } catch(e){}
+        };
+      },
+      error: (err) => {
+        console.error('failed to fetch status', err);
+        try { dialogRef.close(false); } catch (e) {}
+      }
+    });
+
     dialogRef.afterClosed().subscribe((result) => {
       if (result) {
-        // Show success dialog
         const successDialogRef = this.dialog.open(SuccessDialogComponent, {
-          data: { modelName: 'v1.0' },
+          data: { modelName: 'v1.0', message: 'Model distributed to clients successfully.' },
           width: '400px',
           panelClass: 'success-dialog-panel'
         });
 
-        // After success dialog closes, update client statuses quickly
         successDialogRef.afterClosed().subscribe(() => {
-          // Simulate quick distribution to each client with minimal stagger
-          this.clients.forEach((c, idx) => {
-            const startDelay = 100 + idx * 150; // reduced stagger: 100-1600ms instead of 800-6800ms
-            setTimeout(() => {
-              c.status = 'Deploying';
-              // Much shorter deploy window
-              setTimeout(() => {
-                // If previous status was 'Awaiting Model', set to 'Active'; otherwise, set to 'Connected'
-                if (c._prevStatus === 'Awaiting Model') {
-                  c.status = 'Active';
-                } else {
-                  c.status = 'Connected';
-                }
-                // set or update accuracy to a plausible number if not present
-                if (!c.accuracy || c.accuracy === '-' ) {
-                  const acc = (85 + Math.random() * 10).toFixed(1);
-                  c.accuracy = acc + '%';
-                }
-                this.cdr.markForCheck(); // trigger change detection for faster UI update
-              }, 200 + Math.random() * 300); // much faster: 200-500ms instead of 1000-2000ms
-            }, startDelay);
-          });
+          // ensure UI mark for check to show final statuses
+          this.cdr.markForCheck();
         });
       }
     });
@@ -135,15 +232,90 @@ export class DashboardComponent implements OnInit {
     this.showProfileMenu = !this.showProfileMenu;
   }
 
+  private statusPollInterval: any;
+
   viewClientProgress() {
     // Show the client progress dashboard view without navigating away
     this.showClientProgress = true;
     this.showProfileMenu = false;
     this.activeTab = 'basic';
+    
+    // Fetch training history from backend
+    this.clientService.getTrainingHistory().subscribe({
+      next: (historyData) => {
+        if (historyData.rounds && historyData.rounds.length > 0) {
+          this.rounds = historyData.rounds;
+        }
+        this.cdr.markForCheck();
+      },
+      error: (err) => {
+        console.error('Failed to fetch training history', err);
+        // Use default data if API fails
+        this.generateRounds();
+      }
+    });
+    
+    // Start polling for real-time client status
+    this.startStatusPolling();
   }
 
   closeClientProgress() {
     this.showClientProgress = false;
+    // Stop polling when closing
+    if (this.statusPollInterval) {
+      clearInterval(this.statusPollInterval);
+      this.statusPollInterval = null;
+    }
+  }
+
+  startStatusPolling() {
+    // Poll every 2 seconds for real-time status updates
+    if (this.statusPollInterval) {
+      clearInterval(this.statusPollInterval);
+    }
+
+    this.statusPollInterval = setInterval(() => {
+      this.clientService.getClientsStatus().subscribe({
+        next: (statusObj) => {
+          // Update only the first 3 clients with real status
+          for (let i = 1; i <= 3; i++) {
+            const key = `client${i}`;
+            const status = statusObj[key];
+            const client = this.clients.find(c => c.id === i);
+            
+            if (client && status) {
+              if (status.ack) {
+                client.status = 'Active';
+                client.accuracy = client.accuracy || (85 + Math.random() * 10).toFixed(1) + '%';
+              } else if (status.deployed) {
+                client.status = 'Deployed (Awaiting Ack)';
+              } else {
+                client.status = 'Awaiting Model';
+              }
+              client.lastUpdate = new Date().toLocaleTimeString();
+            }
+          }
+          this.cdr.markForCheck();
+        },
+        error: (err) => {
+          console.error('Failed to fetch client status', err);
+        }
+      });
+    }, 2000); // Poll every 2 seconds
+  }
+
+  getClientReadinessPercent(): number {
+    const first3Clients = this.clients.slice(0, 3);
+    const activeCount = first3Clients.filter((c: any) => c.status === 'Active').length;
+    return Math.round((activeCount / 3) * 100);
+  }
+
+  getActiveClientsCount(): number {
+    return this.clients.slice(0, 3).filter((c: any) => c.status === 'Active').length;
+  }
+
+  getAwaitingClientsCount(): number {
+    return this.clients.slice(0, 3).filter((c: any) => c.status === 'Awaiting Model').length;
   }
 
   setActiveTab(tab: 'basic' | 'interactive' | 'diagnostic') {
@@ -154,37 +326,37 @@ export class DashboardComponent implements OnInit {
 
   generateRounds() {
     // create sample rounds up to 5, latest first
-    const maxRounds = 5;
+    const maxRounds = 2;
     const rounds: any[] = [];
     for (let r = maxRounds; r >= 1; r--) {
-      const entries = this.clients.map((c: any, idx: number) => {
+      const clients = this.clients.slice(0, 3).map((c: any, idx: number) => {
         // deterministic-ish sample values based on round and index
         const seed = (r * 13 + idx * 7) % 100;
-        const trainingTime = 30 + (seed % 40); // seconds
-        const modelSize = 20 + ((seed * 3) % 200); // MB
-        const diff = parseFloat((Math.random() * 1.2).toFixed(3));
-        const status = (seed % 11 === 0) ? 'Failed/Timeout' : (seed % 6 === 0 ? 'Training' : (seed % 4 === 0 ? 'Completed' : c.status || '4'));
+        const trainingTime = 40 + (seed % 10); // seconds
+        const modelSize = 50 + ((seed * 3) % 5); // MB
+        const loss = parseFloat((0.45 - r * 0.07 + (Math.random() * 0.05)).toFixed(3));
+        const accuracy = 85 + r * 1.3 + (seed % 5);
         return {
-          clientId: c.clientId || (('00' + (idx + 1)).slice(-3) + String.fromCharCode(65 + (idx % 26))),
-          trainingTime: trainingTime + ' sec',
-          modelSizeMB: modelSize,
-          localDiffNorm: diff,
-          status
-        } as { clientId: string; trainingTime: string; modelSizeMB: number; localDiffNorm: number; status: string; };
+          id: c.clientId || `client${idx + 1}`,
+          trainingTime: trainingTime + 's',
+          modelSize: modelSize,
+          loss: loss,
+          accuracy: accuracy
+        };
       });
 
       // global metrics sample
-      const completionRate = Math.round((entries.filter(e => e.status === 'Completed').length / Math.max(1, entries.length)) * 100);
-      const loss = (0.35 + (r * 0.02) + (Math.random() * 0.1)).toFixed(3);
-      const accuracy = (85 + r * 0.5 + Math.random() * 3).toFixed(1) + '%';
+      const completionRate = 100;
+      const avgLoss = parseFloat((0.407 - r * 0.037).toFixed(3));
+      const avgAccuracy = (86.8 + r * 1.3);
       const roundObj = {
         roundNumber: r,
-        entries,
+        clients,
         global: {
-          loss,
-          accuracy,
+          loss: avgLoss,
+          accuracy: avgAccuracy,
           completionRate,
-          timeElapsed: `${10 + r} min ${('0' + ((r * 7) % 60)).slice(-2)} sec`
+          timeElapsed: `${2 + r * 0.5} min`
         }
       };
       rounds.push(roundObj);
@@ -192,11 +364,11 @@ export class DashboardComponent implements OnInit {
     this.rounds = rounds;
   }
 
-  getBestLocalDiff(round: { entries: { localDiffNorm: number }[] }) {
-    if (!round || !round.entries || round.entries.length === 0) return null;
+  getBestLocalDiff(round: any) {
+    if (!round || !round.clients || round.clients.length === 0) return null;
     let min = Number.POSITIVE_INFINITY;
-    for (const e of round.entries) {
-      if (typeof e.localDiffNorm === 'number' && e.localDiffNorm < min) min = e.localDiffNorm;
+    for (const c of round.clients) {
+      if (typeof c.loss === 'number' && c.loss < min) min = c.loss;
     }
     return isFinite(min) ? min : null;
   }
@@ -205,6 +377,32 @@ export class DashboardComponent implements OnInit {
     const p = Math.max(0, Math.min(100, Math.round(percent || 0)));
     // primary filled color then a muted track
     return { 'background': `conic-gradient(#2fe29a 0 ${p}%, rgba(255,255,255,0.06) ${p}% 100%)` };
+  }
+
+  parseTrainingSeconds(trainingTime: string): number {
+    const match = trainingTime.match(/(\d+)/);
+    return match ? parseInt(match[1], 10) : 0;
+  }
+
+  getClientColor(index: number): string {
+    const colors = ['#ff6b6b', '#4ecdc4', '#45b7d1', '#96ceb4', '#ffeaa7', '#dfe6e9'];
+    return colors[index % colors.length];
+  }
+
+  getChartPoints(clients: any[], clientIndex: number): string {
+    let points = '';
+    const xStart = 80;
+    const xStep = 100;
+    const yBase = 170;
+    const yScale = 50;
+
+    clients.forEach((client, i) => {
+      const x = xStart + (i * xStep);
+      const y = yBase - (client.loss * yScale);
+      points += `${x},${y} `;
+    });
+
+    return points.trim();
   }
 
   getLatestCompletionRate(): number {
@@ -220,205 +418,74 @@ export class DashboardComponent implements OnInit {
   selectedDiagnosticClient: any = null;
   selectedDiagnosticRound: number | null = null;
   diagnosticData: any = {
-    chartData: null,
-    performanceHistory: [],
-    failureLog: [],
-    disconnectionRates: []
+    clientId: '',
+    status: '',
+    loss: 0,
+    accuracy: 0,
+    trainingTime: 'N/A'
   };
-  chartInstance: any = null;
 
   selectDiagnosticClient(clientId: string) {
     this.selectedDiagnosticClient = clientId;
     // Default to latest round if not set
     this.selectedDiagnosticRound = this.rounds.length > 0 ? this.rounds[0].roundNumber : null;
-    this.generateDiagnosticData(clientId, this.selectedDiagnosticRound === null ? undefined : this.selectedDiagnosticRound);
+    this.generateDiagnosticData(clientId);
     this.cdr.markForCheck();
-    setTimeout(() => {
-      this.renderChart();
-    }, 150);
   }
 
   selectDiagnosticRound(round: string | number) {
     // round comes as string from select, ensure number or null
     const roundNum = round !== undefined && round !== null ? Number(round) : null;
     this.selectedDiagnosticRound = roundNum;
-    this.generateDiagnosticData(this.selectedDiagnosticClient, roundNum === null ? undefined : roundNum);
+    this.generateDiagnosticData(this.selectedDiagnosticClient);
     this.cdr.markForCheck();
-    setTimeout(() => {
-      this.renderChart();
-    }, 150);
   }
 
-  renderChart() {
-    if (!this.diagnosticData.chartData) return;
-    
-    try {
-      // Get canvas element by template reference
-      const canvas = this.chartCanvas?.nativeElement as HTMLCanvasElement;
-      if (!canvas) {
-        console.error('Canvas element not found');
-        return;
-      }
+  generateDiagnosticData(clientId: string) {
+    // Find client metrics from real training rounds
+    const clientMetrics: any = {
+      clientId,
+      status: 'Active',
+      loss: 0,
+      accuracy: 0,
+      trainingTime: 'N/A'
+    };
+
+    // Extract real client data from training rounds
+    if (this.rounds && this.rounds.length > 0) {
+      let latestRound: any = null;
       
-      // Destroy existing chart if any
-      if (this.chartInstance) {
-        this.chartInstance.destroy();
-        this.chartInstance = null;
+      // Find the latest round
+      for (let round of this.rounds) {
+        if (round.clients && round.clients.length > 0) {
+          const clientMatch = round.clients.find((c: any) => c.id === clientId);
+          if (clientMatch) {
+            if (!latestRound || round.roundNumber > latestRound.roundNumber) {
+              latestRound = round;
+            }
+          }
+        }
       }
-      
-      // Create new chart
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        this.chartInstance = new ChartJS(ctx, {
-          type: 'line',
-          data: this.diagnosticData.chartData,
-          options: this.getChartOptions()
-        });
+
+      if (latestRound) {
+        const selectedClientData = latestRound.clients.find((c: any) => c.id === clientId);
+        if (selectedClientData) {
+          clientMetrics.loss = selectedClientData.loss;
+          clientMetrics.accuracy = selectedClientData.accuracy;
+          clientMetrics.trainingTime = selectedClientData.trainingTime;
+        }
       }
-    } catch (e) {
-      console.error('Chart rendering error:', e);
     }
-  }
-
-  generateDiagnosticData(clientId: string, roundNumber?: number) {
-    // If a round is selected, show only that round's data; otherwise, show all
-    const rounds = this.rounds.length > 0 ? this.rounds : Array.from({ length: 5 }, (_, i) => ({ roundNumber: 5 - i }));
-    let selectedRound: any = null;
-    if (typeof roundNumber === 'number') {
-      selectedRound = rounds.find((r: any) => r.roundNumber === roundNumber);
-    }
-    // For performanceHistory, if round selected, only that round; else all
-    const performanceHistory = selectedRound && selectedRound.global
-      ? [{ round: selectedRound.roundNumber, loss: selectedRound.global.loss }]
-      : rounds.map((r: any) => ({ round: r.roundNumber, loss: r.global?.loss || (0.8 - r.roundNumber * 0.12 + Math.random() * 0.1).toFixed(3) }));
-
-    // For failureLog and disconnectionRates, just use sample data (could be extended per round)
-    const failureLog = [
-      { round: 28, type: 'Timeout', timespain: '5 min', details: 'Model update not received. Reconnection within 5 min imminent.' },
-      { round: 32, type: 'NAN loss detected during local dcal training. Check dark data integrity.' }
-    ];
-
-    const disconnectionRates = [
-      { round: '15', rate: 5.0 },
-      { round: '16', rate: 2.0 },
-      { round: '17', rate: 2.0 }
-    ];
 
     this.diagnosticData = {
       clientId,
-      performanceHistory,
-      failureLog,
-      disconnectionRates,
-      chartData: this.generatePerformanceChartData(performanceHistory)
+      status: clientMetrics.status,
+      loss: clientMetrics.loss,
+      accuracy: clientMetrics.accuracy,
+      trainingTime: clientMetrics.trainingTime
     };
-  }
 
-  generatePerformanceChartData(history: any[]) {
-    // Extended history from round 0 to 50 with loss curve
-    const allRounds = Array.from({ length: 51 }, (_, i) => i);
-    const lossValues = allRounds.map(r => {
-      // Simulate loss curve: starts high, decreases rapidly, then plateaus
-      if (r === 0) return 1.0;
-      if (r < 10) return 0.9 - r * 0.08;
-      if (r < 25) return 0.25 - (r - 10) * 0.015;
-      return Math.max(0.05, 0.075 - (r - 25) * 0.002);
-    });
-
-    return {
-      labels: allRounds,
-      datasets: [
-        {
-          label: `Client ${this.selectedDiagnosticClient} Local Loss`,
-          data: lossValues,
-          borderColor: '#00ff88',
-          backgroundColor: 'rgba(0, 255, 136, 0.08)',
-          borderWidth: 3,
-          fill: false,
-          tension: 0.4,
-          pointRadius: 0,
-          pointHoverRadius: 6,
-          pointBackgroundColor: '#00ff88',
-          pointBorderColor: '#00ff88'
-        }
-      ]
-    };
-  }
-
-  getChartOptions() {
-    return {
-      responsive: true,
-      maintainAspectRatio: false,
-      interaction: {
-        intersect: false,
-        mode: 'index'
-      },
-      plugins: {
-        filler: { propagate: true },
-        legend: {
-          display: true,
-          labels: {
-            color: '#00ff88',
-            font: { size: 12, family: 'Poppins, Arial, sans-serif' },
-            usePointStyle: true,
-            padding: 15
-          }
-        },
-        tooltip: {
-          backgroundColor: 'rgba(0, 0, 0, 0.8)',
-          titleColor: '#00ff88',
-          bodyColor: '#fff',
-          borderColor: '#00ff88',
-          borderWidth: 1,
-          padding: 10,
-          displayColors: false,
-          callbacks: {
-            title: (context: any) => `Round ${context[0].label}`,
-            label: (context: any) => `Loss: ${Number(context.parsed.y).toFixed(3)}`
-          }
-        }
-      },
-      scales: {
-        x: {
-          display: true,
-          title: {
-            display: true,
-            text: 'Round',
-            color: '#9fbfdc',
-            font: { size: 12 }
-          },
-          ticks: {
-            color: '#9fbfdc',
-            font: { size: 10 },
-            maxTicksLimit: 10
-          },
-          grid: {
-            color: 'rgba(255,255,255,0.05)',
-            drawBorder: true,
-            borderColor: 'rgba(255,255,255,0.1)'
-          }
-        },
-        y: {
-          display: true,
-          title: {
-            display: true,
-            text: 'Loss',
-            color: '#9fbfdc',
-            font: { size: 12 }
-          },
-          ticks: {
-            color: '#9fbfdc',
-            font: { size: 10 }
-          },
-          grid: {
-            color: 'rgba(255,255,255,0.08)',
-            drawBorder: true,
-            borderColor: 'rgba(255,255,255,0.1)'
-          },
-          min: 0,
-          max: 1.1
-        }
-      }
-    } as any;
+    this.cdr.markForCheck();
   }
 
   // Helpers used by the client progress view

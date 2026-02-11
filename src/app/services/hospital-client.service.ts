@@ -1,4 +1,11 @@
+import { Injectable } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
+import { Observable } from 'rxjs';
+
+@Injectable({ providedIn: 'root' })
 export class HospitalClientService {
+  private apiBase = 'http://localhost:8000';
+
   private clients = [
     { id: 1, clientId: '001A', name: 'Central Hospital', location: 'City A', status: 'Awaiting Model', dataSize: '1.2 TB' },
     { id: 2, clientId: '002B', name: 'Eastside Clinic', location: 'City B', status: 'Awaiting Model', dataSize: '1.8 TB' },
@@ -12,11 +19,38 @@ export class HospitalClientService {
     { id: 10, clientId: '010J', name: 'Northside Medical', location: 'City J', status: 'Awaiting Model', dataSize: '2.9 TB' },
   ];
 
+  constructor(private http: HttpClient) {}
+
   getClients(): any[] {
     return this.clients;
   }
 
   getClient(id: number): any | undefined {
     return this.clients.find(c => c.id === id);
+  }
+
+  distributeModel(): Observable<any> {
+    return this.http.post(`${this.apiBase}/distribute`, {});
+  }
+
+  distributeStreamUrl(): string {
+    return `${this.apiBase}/distribute_stream`;
+  }
+
+  status(): Observable<any> {
+    return this.http.get(`${this.apiBase}/status`);
+  }
+
+  getClientsStatus(): Observable<any> {
+    return this.http.get(`${this.apiBase}/clients_status`);
+  }
+
+  // optional helper for ack (not used by UI currently)
+  acknowledgeClient(clientId: number): Observable<any> {
+    return this.http.post(`${this.apiBase}/acknowledge/${clientId}`, {});
+  }
+
+  getTrainingHistory(): Observable<any> {
+    return this.http.get(`${this.apiBase}/training_history`);
   }
 }
